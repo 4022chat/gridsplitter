@@ -1,4 +1,4 @@
-import { GIFEncoder, quantize, applyPalette } from 'gifenc';
+import { GIFEncoder, quantize } from 'gifenc';
 import { loadImage } from './imageProcessing';
 
 export type GifAlignMode = 'off' | 'center' | 'uniform';
@@ -255,75 +255,155 @@ export const drawFrame = (
 
 // ---- 透明 GIF 专用编码 ----
 
-// alpha 二值化阈值：低于此值直接透明，高于等于则完全不透明
-const ALPHA_BINARIZE_THRESHOLD = 128;
+// 8x8 Bayer 有序抖动矩阵（值 0-63）
+// GIF 每帧最多 256 色，直接量化会出现色彩断层（看起来"变模糊"）；
+// 抖动通过空间混色让 256 色输出在视觉上接近 24bit 原图
+const BAYER8 = [
+  0, 32, 8, 40, 2, 34, 10, 42,
+  48, 16, 56, 24, 50, 18, 58, 26,
+  12, 44, 4, 36, 14, 46, 6, 38,
+  60, 28, 52, 20, 62, 30, 54, 22,
+  3, 35, 11, 43, 1, 33, 9, 41,
+  51, 19, 59, 27, 49, 17, 57, 25,
+  15, 47, 7, 39, 13, 45, 5, 37,
+  63, 31, 55, 23, 61, 29, 53, 21,
+];
+// RGB 抖动幅度
+const DITHER_STRENGTH = 24;
 
-// 先将 alpha 二值化（GIF 只支持 1bit 透明度），再用 rgb565 做高质量颜色量化，
-// 最后预留一个专用透明索引，避免半透明边缘像素被量化成深色 → 黑边。
+const bayerAt = (x: number, y: number) => BAYER8[(x & 7) + ((y & 7) << 3)] / 64;
+
+const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v);
+
+// 带缓存的最近调色板颜色匹配（跳过透明项）
+const buildNearestColorMatcher = (palette: number[][]) => {
+  const cache = new Int16Array(32768).fill(-1); // key: r5g5b5
+  return (r: number, g: number, b: number): number => {
+    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    let idx = cache[key];
+    if (idx < 0) {
+      let best = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < palette.length; i++) {
+        const c = palette[i];
+        if (c.length >= 4 && c[3] === 0) continue; // 透明项不参与颜色匹配
+        const dr = c[0] - r;
+        const dg = c[1] - g;
+        const db = c[2] - b;
+        const d = dr * dr + dg * dg + db * db;
+        if (d < bestDist) {
+          bestDist = d;
+          best = i;
+        }
+      }
+      idx = best;
+      cache[key] = idx;
+    }
+    return idx;
+  };
+};
+
+// 不透明帧：rgb565 量化 + Bayer 抖动映射
+const writeOpaqueFrame = (
+  gif: ReturnType<typeof GIFEncoder>,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  delay: number,
+  repeat: number
+) => {
+  const palette = quantize(data, 256, { format: 'rgb565' });
+  const match = buildNearestColorMatcher(palette);
+
+  const n = width * height;
+  const index = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    const x = p % width;
+    const y = (p - x) / width;
+    const off = (bayerAt(x, y) - 0.5) * DITHER_STRENGTH;
+    const i = p * 4;
+    index[p] = match(
+      clamp255(Math.round(data[i] + off)),
+      clamp255(Math.round(data[i + 1] + off)),
+      clamp255(Math.round(data[i + 2] + off))
+    );
+  }
+
+  gif.writeFrame(index, width, height, { palette, delay, repeat });
+};
+
+// 透明帧：alpha 二值化（GIF 只支持 1bit 透明度）+ rgb565 量化 + 抖动
+// alpha 阈值也做 Bayer 抖动，让半透明边缘在二值化后依然视觉平滑；
+// 透明像素直接指向专用透明索引，避免边缘被量化成深色 → 黑边
 const writeTransparentFrame = (
   gif: ReturnType<typeof GIFEncoder>,
   data: Uint8ClampedArray,
   width: number,
   height: number,
   delay: number,
-  repeat: number,
-  first: boolean
+  repeat: number
 ) => {
-  // 1. 二值化 alpha：丢弃的像素 RGB 清零（会进入专用透明索引）
-  const binary = new Uint8ClampedArray(data);
-  let hasTransparent = false;
+  const n = width * height;
+
+  // 1. 按抖动阈值二值化 alpha
+  const opaque = new Uint8Array(n);
   let opaqueCount = 0;
-  for (let i = 0; i < binary.length; i += 4) {
-    if (binary[i + 3] < ALPHA_BINARIZE_THRESHOLD) {
-      binary[i] = 0; binary[i + 1] = 0; binary[i + 2] = 0; binary[i + 3] = 0;
-      hasTransparent = true;
-    } else {
-      binary[i + 3] = 255;
+  for (let p = 0; p < n; p++) {
+    const x = p % width;
+    const y = (p - x) / width;
+    const a = data[p * 4 + 3];
+    if (a > bayerAt(x, y) * 255) {
+      opaque[p] = 1;
       opaqueCount++;
     }
   }
 
-  let palette: number[][];
-  let transparentIndex: number;
-
-  if (!hasTransparent || opaqueCount === 0) {
-    if (opaqueCount === 0) {
-      // 整帧透明
-      palette = [[0, 0, 0, 0]];
-      gif.writeFrame(new Uint8Array(width * height), width, height, {
-        palette, delay, repeat,
-        transparent: true, transparentIndex: 0, dispose: 2,
-      });
-      return;
-    }
-    if (!hasTransparent) {
-      // 无透明像素 → 按不透明帧处理
-      const pal = quantize(binary, 256, { format: 'rgb565' });
-      const index = applyPalette(binary, pal, 'rgb565');
-      gif.writeFrame(index, width, height, { palette: pal, delay, repeat });
-      return;
-    }
+  if (opaqueCount === 0) {
+    // 整帧透明
+    gif.writeFrame(new Uint8Array(n), width, height, {
+      palette: [[0, 0, 0, 0]], delay, repeat,
+      transparent: true, transparentIndex: 0, dispose: 2,
+    });
+    return;
+  }
+  if (opaqueCount === n) {
+    writeOpaqueFrame(gif, data, width, height, delay, repeat);
+    return;
   }
 
-  // 2. 只用不透明像素做颜色量化（rgb565，8bit 级色彩质量，避免 rgba4444 的色彩断层）
+  // 2. 只用不透明像素的原色做量化（rgb565，接近 8bit 色彩质量）
   const opaqueData = new Uint8ClampedArray(opaqueCount * 4);
-  for (let i = 0, j = 0; i < binary.length; i += 4) {
-    if (binary[i + 3] === 255) {
-      opaqueData[j++] = binary[i];
-      opaqueData[j++] = binary[i + 1];
-      opaqueData[j++] = binary[i + 2];
+  for (let p = 0, j = 0; p < n; p++) {
+    if (opaque[p]) {
+      const i = p * 4;
+      opaqueData[j++] = data[i];
+      opaqueData[j++] = data[i + 1];
+      opaqueData[j++] = data[i + 2];
       opaqueData[j++] = 255;
     }
   }
-  palette = quantize(opaqueData, 255, { format: 'rgb565' });
-  // 3. 预留专用透明索引（挂在实际不存在的颜色上，不会与真实颜色冲突）
+  const palette = quantize(opaqueData, 255, { format: 'rgb565' });
+  // 3. 预留专用透明索引（挂在调色板末尾，不参与颜色匹配）
   palette.push([0, 0, 0, 0]);
-  transparentIndex = palette.length - 1;
+  const transparentIndex = palette.length - 1;
+  const match = buildNearestColorMatcher(palette);
 
-  // 4. 按调色板映射像素，透明像素直接指向透明索引
-  const index = applyPalette(binary, palette, 'rgb565');
-  for (let i = 0, p = 0; i < binary.length; i += 4, p++) {
-    if (binary[i + 3] === 0) index[p] = transparentIndex;
+  // 4. 抖动映射；透明像素直接指向透明索引
+  const index = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    if (!opaque[p]) {
+      index[p] = transparentIndex;
+      continue;
+    }
+    const x = p % width;
+    const y = (p - x) / width;
+    const off = (bayerAt(x, y) - 0.5) * DITHER_STRENGTH;
+    const i = p * 4;
+    index[p] = match(
+      clamp255(Math.round(data[i] + off)),
+      clamp255(Math.round(data[i + 1] + off)),
+      clamp255(Math.round(data[i + 2] + off))
+    );
   }
 
   gif.writeFrame(index, width, height, {
@@ -332,7 +412,9 @@ const writeTransparentFrame = (
   });
 };
 
-// 将一组切片图片合成为 GIF，返回 Blob
+// 将一组切片图片合成为 GIF，返回 Blob。
+// frameUrls 传入预览帧（已含对齐布局的合成图）时，配合 align: 'off'
+// 可原样编码，不重新计算布局 —— 保证导出与预览像素一致
 export const generateGif = async (
   frameUrls: string[],
   options: GifOptions
@@ -350,11 +432,9 @@ export const generateGif = async (
     const { data, width, height } = ctx.getImageData(0, 0, size, size);
 
     if (transparent) {
-      writeTransparentFrame(gif, data, width, height, delay, repeat, i === 0);
+      writeTransparentFrame(gif, data, width, height, delay, repeat);
     } else {
-      const palette = quantize(data, 256, { format: 'rgb565' });
-      const index = applyPalette(data, palette, 'rgb565');
-      gif.writeFrame(index, width, height, { palette, delay, repeat });
+      writeOpaqueFrame(gif, data, width, height, delay, repeat);
     }
   });
 

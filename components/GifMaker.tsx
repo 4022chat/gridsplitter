@@ -94,7 +94,12 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
     setIsGenerating(true);
     setError(null);
     try {
-      const blob = await generateGif(frames, { delay, size, loop, transparent, align });
+      // 直接编码预览帧（对齐布局已烘焙在内），align:'off' 原样通过 → 导出与预览像素一致
+      const sourceFrames =
+        alignedPreviews.length === frames.length ? alignedPreviews : frames;
+      const blob = await generateGif(sourceFrames, {
+        delay, size, loop, transparent, align: 'off',
+      });
       const url = URL.createObjectURL(blob);
       setGifUrl(url);
     } catch (e) {
