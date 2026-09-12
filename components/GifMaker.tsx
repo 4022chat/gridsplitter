@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icons } from './Icon';
 import { useApp } from '../contexts/AppContext';
 import { SliceData } from '../types';
-import { generateGif } from '../utils/gifGenerator';
+import { generateGif, GifAlignMode } from '../utils/gifGenerator';
 
 interface GifMakerProps {
   slices: SliceData[];
@@ -20,6 +20,7 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
   const [size, setSize] = useState(256);
   const [transparent, setTransparent] = useState(true);
   const [loop, setLoop] = useState(true);
+  const [align, setAlign] = useState<GifAlignMode>('uniform');
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [gifUrl, setGifUrl] = useState<string | null>(null);
@@ -55,7 +56,7 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
       setGifUrl(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [delay, size, transparent, loop]);
+  }, [delay, size, transparent, loop, align]);
 
   const toggleFrame = (idx: number) => {
     setSelected(prev => prev.map((s, i) => (i === idx ? !s : s)));
@@ -71,7 +72,7 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
     setIsGenerating(true);
     setError(null);
     try {
-      const blob = await generateGif(frames, { delay, size, loop, transparent });
+      const blob = await generateGif(frames, { delay, size, loop, transparent, align });
       const url = URL.createObjectURL(blob);
       setGifUrl(url);
     } catch (e) {
@@ -176,6 +177,42 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
                 className="w-full accent-purple-600"
               />
               <div className="text-center text-[10px] font-mono text-slate-400">{delay} ms</div>
+            </div>
+
+            {/* Auto align */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-wider">
+                {t('gif_align')}
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {([
+                  { mode: 'off' as GifAlignMode, label: t('gif_align_off') },
+                  { mode: 'center' as GifAlignMode, label: t('gif_align_center') },
+                  { mode: 'uniform' as GifAlignMode, label: t('gif_align_uniform') },
+                ]).map(opt => (
+                  <button
+                    key={opt.mode}
+                    onClick={() => setAlign(opt.mode)}
+                    className={`py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                      align === opt.mode
+                        ? 'bg-purple-600 border-purple-600 text-white'
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:border-purple-400'
+                    }`}
+                    title={
+                      opt.mode === 'off'
+                        ? t('gif_align_off_hint')
+                        : opt.mode === 'center'
+                        ? t('gif_align_center_hint')
+                        : t('gif_align_uniform_hint')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1.5 leading-relaxed">
+                {t('gif_align_hint')}
+              </p>
             </div>
 
             {/* Output size */}

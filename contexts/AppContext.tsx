@@ -83,6 +83,14 @@ const translations = {
     gif_empty: "请至少选择一帧",
     gif_frames_unit: "帧",
     gif_error: "GIF 生成失败，请重试",
+    gif_align: "自动对齐",
+    gif_align_off: "关闭",
+    gif_align_off_hint: "不做对齐，整帧缩放居中",
+    gif_align_center: "居中",
+    gif_align_center_hint: "裁出每帧内容并居中，保留各帧相对大小",
+    gif_align_uniform: "居中+统一",
+    gif_align_uniform_hint: "裁出每帧内容，统一缩放到相同大小并居中（推荐）",
+    gif_align_hint: "自动检测每帧内容区域，修正切片的位置与大小偏差；对齐效果在生成后的预览中体现",
   },
   en: {
     app_title: "GridSplitter Pro",
@@ -155,7 +163,15 @@ const translations = {
     gif_preview_generated: "Actual GIF preview",
     gif_empty: "Please select at least one frame",
     gif_frames_unit: "frames",
-    gif_error: "GIF generation failed, please retry"
+    gif_error: "GIF generation failed, please retry",
+    gif_align: "Auto Align",
+    gif_align_off: "Off",
+    gif_align_off_hint: "No alignment; scale and center the whole frame",
+    gif_align_center: "Center",
+    gif_align_center_hint: "Crop each frame's content and center it, keeping relative sizes",
+    gif_align_uniform: "Center+Fit",
+    gif_align_uniform_hint: "Crop content and normalize to the same size, centered (recommended)",
+    gif_align_hint: "Detects each frame's content area to fix offset & size drift; alignment is applied to the generated GIF preview"
   }
 };
 
