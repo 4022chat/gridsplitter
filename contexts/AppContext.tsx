@@ -90,7 +90,7 @@ const translations = {
     gif_align_center_hint: "裁出每帧内容并居中，保留各帧相对大小",
     gif_align_uniform: "居中+统一",
     gif_align_uniform_hint: "裁出每帧内容，统一缩放到相同大小并居中（推荐）",
-    gif_align_hint: "自动检测每帧内容区域，修正切片的位置与大小偏差；对齐效果在生成后的预览中体现",
+    gif_align_hint: "自动检测每帧内容区域，修正切片的位置与大小偏差，预览即为对齐后的效果",
   },
   en: {
     app_title: "GridSplitter Pro",

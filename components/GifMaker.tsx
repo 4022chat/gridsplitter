@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icons } from './Icon';
 import { useApp } from '../contexts/AppContext';
 import { SliceData } from '../types';
-import { generateGif, GifAlignMode } from '../utils/gifGenerator';
+import { generateGif, GifAlignMode, computeFrameLayouts, drawFrame } from '../utils/gifGenerator';
 
 interface GifMakerProps {
   slices: SliceData[];
@@ -33,14 +33,36 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
     [slices, selected]
   );
 
+  // 预览帧也应用对齐布局（与最终 GIF 一致）
+  const [alignedPreviews, setAlignedPreviews] = useState<string[]>(frames);
+
   useEffect(() => {
-    if (gifUrl || frames.length === 0) return;
+    let cancelled = false;
+    const run = async () => {
+      if (frames.length === 0) {
+        setAlignedPreviews([]);
+        return;
+      }
+      const { images, layouts } = await computeFrameLayouts(frames, align, size);
+      if (cancelled) return;
+      setAlignedPreviews(
+        images.map((img, i) => drawFrame(img, layouts[i], size, transparent ? null : '#ffffff').toDataURL('image/png'))
+      );
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [frames, align, size, transparent]);
+
+  const previewFrames = gifUrl ? frames : alignedPreviews;
+
+  useEffect(() => {
+    if (gifUrl || previewFrames.length === 0) return;
     setPreviewIdx(0);
     const timer = setInterval(() => {
-      setPreviewIdx(prev => (prev + 1) % frames.length);
+      setPreviewIdx(prev => (prev + 1) % previewFrames.length);
     }, Math.max(delay, 50));
     return () => clearInterval(timer);
-  }, [frames, delay, gifUrl]);
+  }, [previewFrames, delay, gifUrl]);
 
   // 释放生成的 GIF objectURL
   useEffect(() => {
@@ -125,7 +147,7 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
                 backgroundColor: '#fff',
               }}
             >
-              {frames.length === 0 ? (
+              {previewFrames.length === 0 ? (
                 <div className="w-full h-full flex items-center justify-center text-slate-400 dark:text-slate-500 text-sm px-4 text-center">
                   {t('gif_empty')}
                 </div>
@@ -133,7 +155,7 @@ export const GifMaker: React.FC<GifMakerProps> = ({ slices, onClose }) => {
                 <img src={gifUrl} alt="GIF Preview" className="w-full h-full object-contain" />
               ) : (
                 <img
-                  src={frames[Math.min(previewIdx, frames.length - 1)]}
+                  src={previewFrames[Math.min(previewIdx, previewFrames.length - 1)]}
                   alt={`Frame ${previewIdx + 1}`}
                   className="w-full h-full object-contain"
                 />
