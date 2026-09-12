@@ -4,6 +4,7 @@ import { PromptTabs } from './components/PromptTabs';
 import { BrandCard } from './components/BrandCard';
 import { ImageCropper } from './components/ImageCropper';
 import { SliceEditor } from './components/SliceEditor';
+import { GifMaker } from './components/GifMaker';
 import { getCroppedImg, generateSlices, downloadImage, padImageToSquare } from './utils/imageProcessing';
 import { Brand, CropArea, SliceData } from './types';
 import { useApp } from './contexts/AppContext';
@@ -36,6 +37,9 @@ function App() {
 
   // Editor State
   const [editingSlice, setEditingSlice] = useState<SliceData | null>(null);
+
+  // GIF Maker State
+  const [isGifMakerOpen, setIsGifMakerOpen] = useState(false);
 
   // File Upload Handler
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -303,6 +307,13 @@ function App() {
                   </div>
                   <div className="flex gap-2">
                     <button 
+                      onClick={() => setIsGifMakerOpen(true)}
+                      className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-purple-200 dark:shadow-purple-900/50 hover:shadow-purple-300 dark:hover:shadow-purple-800/50 hover:-translate-y-0.5 flex items-center gap-2"
+                    >
+                      <Icons.Clapperboard className="w-4 h-4" />
+                      {t('gif_button')}
+                    </button>
+                    <button 
                       onClick={handleDownloadAll}
                       disabled={isZipping}
                       className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-70 disabled:cursor-wait text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-200 dark:shadow-indigo-900/50 hover:shadow-indigo-300 dark:hover:shadow-indigo-800/50 hover:-translate-y-0.5 flex items-center gap-2"
@@ -532,6 +543,14 @@ function App() {
           slice={editingSlice}
           onSave={updateSlice}
           onClose={() => setEditingSlice(null)}
+        />
+      )}
+
+      {/* GIF Maker Modal */}
+      {isGifMakerOpen && slices.length > 0 && (
+        <GifMaker 
+          slices={slices}
+          onClose={() => setIsGifMakerOpen(false)}
         />
       )}
 
